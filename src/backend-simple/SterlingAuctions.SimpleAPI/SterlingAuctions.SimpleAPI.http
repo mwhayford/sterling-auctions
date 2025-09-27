@@ -1,0 +1,6 @@
+@SterlingAuctions.SimpleAPI_HostAddress = http://localhost:5043
+
+GET {{SterlingAuctions.SimpleAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

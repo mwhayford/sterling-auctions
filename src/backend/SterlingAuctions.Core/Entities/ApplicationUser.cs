@@ -34,6 +34,21 @@ public class ApplicationUser : IdentityUser
     public string? ProfileImageUrl { get; set; }
 
     /// <summary>
+    /// Indicates if the user account is active
+    /// </summary>
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Date and time when the user was created
+    /// </summary>
+    public DateTime CreatedDate { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Date and time when the user was last modified
+    /// </summary>
+    public DateTime LastModifiedDate { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
     /// Date of birth
     /// </summary>
     public DateTime? DateOfBirth { get; set; }
