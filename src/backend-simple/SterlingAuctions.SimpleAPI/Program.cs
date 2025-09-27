@@ -13,8 +13,22 @@ using SterlingAuctions.SimpleAPI.Configuration;
 using SterlingAuctions.SimpleAPI.Middleware;
 using SterlingAuctions.SimpleAPI.Services;
 using SterlingAuctions.SimpleAPI.Hubs;
+using Amazon.CloudWatch;
+using Amazon.CloudWatchLogs;
+using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure Serilog
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .WriteTo.Console()
+    .WriteToCloudWatch(builder.Configuration)
+    .WriteToSeq(builder.Configuration)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 // Database Configuration (In-Memory for simplicity)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -57,6 +71,18 @@ builder.Services.AddScoped<ISessionService, RedisSessionService>();
 
 // Payment Services
 builder.Services.AddScoped<IPaymentService, SimplePaymentService>();
+
+// AWS Services
+builder.Services.AddAWSService<IAmazonCloudWatch>();
+builder.Services.AddAWSService<IAmazonCloudWatchLogs>();
+
+// Monitoring Services
+builder.Services.AddScoped<ICloudWatchMetricsService, CloudWatchMetricsService>();
+builder.Services.AddScoped<ICloudWatchLoggingService, CloudWatchLoggingService>();
+builder.Services.AddScoped<ISeqLoggingService, SeqLoggingService>();
+builder.Services.AddScoped<ICombinedLoggingService, CombinedLoggingService>();
+builder.Services.AddScoped<IApplicationMetricsService, ApplicationMetricsService>();
+builder.Services.AddScoped<IApplicationLoggingService, ApplicationLoggingService>();
 
 // Health Checks
 builder.Services.AddHealthChecks()
