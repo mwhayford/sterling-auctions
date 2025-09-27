@@ -24,6 +24,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.Configure<GoogleOAuthSettings>(builder.Configuration.GetSection("GoogleOAuth"));
 builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("RedisSettings"));
 builder.Services.Configure<CacheSettings>(builder.Configuration.GetSection("CacheSettings"));
+builder.Services.Configure<StripeSettings>(builder.Configuration.GetSection("StripeSettings"));
 
 // Redis Configuration
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -53,6 +54,9 @@ builder.Services.AddScoped<ICachedAuctionService, CachedAuctionService>();
 
 // Session Services
 builder.Services.AddScoped<ISessionService, RedisSessionService>();
+
+// Payment Services
+builder.Services.AddScoped<IPaymentService, SimplePaymentService>();
 
 // Health Checks
 builder.Services.AddHealthChecks()
