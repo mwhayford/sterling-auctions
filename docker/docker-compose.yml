@@ -40,11 +40,11 @@ services:
       - RedisSettings__ConnectionString=redis:6379
       - RedisSettings__InstanceName=SterlingAuctions
       - RedisSettings__DefaultDatabase=0
-      - RedisSettings__ConnectTimeout=5000
-      - RedisSettings__SyncTimeout=5000
+      - RedisSettings__ConnectTimeout=10000
+      - RedisSettings__SyncTimeout=10000
       - RedisSettings__AbortOnConnectFail=false
-      - RedisSettings__RetryCount=3
-      - RedisSettings__RetryDelayMs=1000
+      - RedisSettings__RetryCount=5
+      - RedisSettings__RetryDelayMs=2000
       - JwtSettings__SecretKey=sterling-auctions-super-secret-jwt-key-at-least-32-characters-long!
       - JwtSettings__Issuer=sterling-auctions
       - JwtSettings__Audience=sterling-auctions-users
