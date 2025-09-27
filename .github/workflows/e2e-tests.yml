@@ -1,0 +1,182 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+jobs:
+  e2e-tests:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        browser: [chromium, firefox, webkit]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: |
+          tests/e2e/package-lock.json
+          src/frontend/package-lock.json
+          
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+        
+    - name: Install frontend dependencies
+      run: |
+        cd src/frontend
+        npm ci
+        
+    - name: Install E2E test dependencies
+      run: |
+        cd tests/e2e
+        npm ci
+        
+    - name: Install Playwright browsers
+      run: |
+        cd tests/e2e
+        npx playwright install --with-deps ${{ matrix.browser }}
+        
+    - name: Build frontend
+      run: |
+        cd src/frontend
+        npm run build
+        
+    - name: Build backend
+      run: |
+        cd src/backend-simple/SterlingAuctions.SimpleAPI
+        dotnet build
+        
+    - name: Run E2E tests
+      run: |
+        cd tests/e2e
+        npx playwright test --project=${{ matrix.browser }}
+      env:
+        CI: true
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-report-${{ matrix.browser }}
+        path: tests/e2e/playwright-report/
+        retention-days: 30
+        
+    - name: Upload test videos
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: playwright-videos-${{ matrix.browser }}
+        path: tests/e2e/test-results/
+        retention-days: 7
+        
+    - name: Upload screenshots
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: playwright-screenshots-${{ matrix.browser }}
+        path: tests/e2e/test-results/screenshots/
+        retention-days: 7
+
+  e2e-tests-mobile:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        device: [Mobile Chrome, Mobile Safari]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: |
+          tests/e2e/package-lock.json
+          src/frontend/package-lock.json
+          
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+        
+    - name: Install frontend dependencies
+      run: |
+        cd src/frontend
+        npm ci
+        
+    - name: Install E2E test dependencies
+      run: |
+        cd tests/e2e
+        npm ci
+        
+    - name: Install Playwright browsers
+      run: |
+        cd tests/e2e
+        npx playwright install --with-deps
+        
+    - name: Build frontend
+      run: |
+        cd src/frontend
+        npm run build
+        
+    - name: Build backend
+      run: |
+        cd src/backend-simple/SterlingAuctions.SimpleAPI
+        dotnet build
+        
+    - name: Run mobile E2E tests
+      run: |
+        cd tests/e2e
+        npx playwright test --project="${{ matrix.device }}"
+      env:
+        CI: true
+        
+    - name: Upload mobile test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-mobile-report-${{ matrix.device }}
+        path: tests/e2e/playwright-report/
+        retention-days: 30
+
+  test-summary:
+    needs: [e2e-tests, e2e-tests-mobile]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Download all test results
+      uses: actions/download-artifact@v4
+      
+    - name: Generate test summary
+      run: |
+        echo "## E2E Test Results Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Desktop Browsers" >> $GITHUB_STEP_SUMMARY
+        echo "- Chromium: ${{ needs.e2e-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Firefox: ${{ needs.e2e-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- WebKit: ${{ needs.e2e-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Mobile Devices" >> $GITHUB_STEP_SUMMARY
+        echo "- Mobile Chrome: ${{ needs.e2e-tests-mobile.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Mobile Safari: ${{ needs.e2e-tests-mobile.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Test Artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "Test reports, screenshots, and videos are available in the artifacts section." >> $GITHUB_STEP_SUMMARY

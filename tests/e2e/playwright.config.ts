@@ -97,8 +97,8 @@ export default defineConfig({
       timeout: 120000,
     },
     {
-      command: 'dotnet run --project SterlingAuctions.API.csproj',
-      cwd: '../../src/backend',
+      command: 'dotnet run --project SterlingAuctions.SimpleAPI.csproj',
+      cwd: '../../src/backend-simple/SterlingAuctions.SimpleAPI',
       port: 5000,
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
