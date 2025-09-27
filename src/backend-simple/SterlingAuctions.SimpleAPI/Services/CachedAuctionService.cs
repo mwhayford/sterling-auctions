@@ -30,6 +30,7 @@ public class CachedAuctionService : ICachedAuctionService
     private readonly ICacheService _cacheService;
     private readonly ICacheKeyGenerator _keyGenerator;
     private readonly ICacheInvalidationService _cacheInvalidationService;
+    private readonly INotificationService _notificationService;
     private readonly ILogger<CachedAuctionService> _logger;
     private readonly IOptions<CacheSettings> _cacheSettings;
 
@@ -37,12 +38,14 @@ public class CachedAuctionService : ICachedAuctionService
         ICacheService cacheService,
         ICacheKeyGenerator keyGenerator,
         ICacheInvalidationService cacheInvalidationService,
+        INotificationService notificationService,
         ILogger<CachedAuctionService> logger,
         IOptions<CacheSettings> cacheSettings)
     {
         _cacheService = cacheService;
         _keyGenerator = keyGenerator;
         _cacheInvalidationService = cacheInvalidationService;
+        _notificationService = notificationService;
         _logger = logger;
         _cacheSettings = cacheSettings;
     }
@@ -251,6 +254,9 @@ public class CachedAuctionService : ICachedAuctionService
             // Invalidate auction and bid caches
             await _cacheInvalidationService.InvalidateAuctionCacheAsync(auctionId);
             await _cacheInvalidationService.InvalidateBidCacheAsync(auctionId);
+            
+            // Send SignalR notification for the new bid
+            await _notificationService.NotifyAuctionBidPlacedAsync(auctionId, bid, userId);
             
             _logger.LogInformation("Bid placed on auction {AuctionId} by user {UserId}", auctionId, userId);
             return bid;

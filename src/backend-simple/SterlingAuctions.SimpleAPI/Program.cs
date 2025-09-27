@@ -12,6 +12,7 @@ using SterlingAuctions.SimpleAPI.Data;
 using SterlingAuctions.SimpleAPI.Configuration;
 using SterlingAuctions.SimpleAPI.Middleware;
 using SterlingAuctions.SimpleAPI.Services;
+using SterlingAuctions.SimpleAPI.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -158,15 +159,27 @@ builder.Services.AddScoped<IAuthorizationHandler, AuctionAuthorizationHandler>()
 // Add controllers
 builder.Services.AddControllers();
 
+// SignalR Configuration
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    options.HandshakeTimeout = TimeSpan.FromSeconds(15);
+});
+
+// Notification Services
+builder.Services.AddScoped<INotificationService, SignalRNotificationService>();
+
 // CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000")
+        policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
               .AllowAnyMethod()
               .AllowAnyHeader()
-              .AllowCredentials();
+              .AllowCredentials(); // Required for SignalR
     });
 });
 
@@ -234,6 +247,10 @@ app.UseMiddleware<RoleBasedAuthorizationMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// SignalR Hub Mapping
+app.MapHub<AuctionHub>("/auctionHub");
+app.MapHub<NotificationHub>("/notificationHub");
 
 // Basic health check
 app.MapGet("/", () => new 
