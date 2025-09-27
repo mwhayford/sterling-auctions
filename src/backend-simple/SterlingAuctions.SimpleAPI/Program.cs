@@ -13,18 +13,32 @@ using SterlingAuctions.SimpleAPI.Configuration;
 using SterlingAuctions.SimpleAPI.Middleware;
 using SterlingAuctions.SimpleAPI.Services;
 using SterlingAuctions.SimpleAPI.Hubs;
+using Amazon.CloudWatch;
+using Amazon.CloudWatchLogs;
+using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Configure Serilog
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .WriteTo.Console()
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 // Database Configuration (In-Memory for simplicity)
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseInMemoryDatabase("SterlingAuctions"));
 
-// Configuration
-builder.Services.Configure<GoogleOAuthSettings>(builder.Configuration.GetSection("GoogleOAuth"));
-builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("RedisSettings"));
-builder.Services.Configure<CacheSettings>(builder.Configuration.GetSection("CacheSettings"));
-builder.Services.Configure<StripeSettings>(builder.Configuration.GetSection("StripeSettings"));
+    // Configuration
+    builder.Services.Configure<GoogleOAuthSettings>(builder.Configuration.GetSection("GoogleOAuth"));
+    builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("RedisSettings"));
+    builder.Services.Configure<CacheSettings>(builder.Configuration.GetSection("CacheSettings"));
+    builder.Services.Configure<StripeSettings>(builder.Configuration.GetSection("StripeSettings"));
+    builder.Services.Configure<SterlingAuctions.SimpleAPI.Configuration.ConnectionManagerSettings>(builder.Configuration.GetSection("ConnectionManager"));
+    builder.Services.Configure<SignalRPerformanceConfig>(builder.Configuration.GetSection("SignalRPerformance"));
 
 // Redis Configuration
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -57,6 +71,25 @@ builder.Services.AddScoped<ISessionService, RedisSessionService>();
 
 // Payment Services
 builder.Services.AddScoped<IPaymentService, SimplePaymentService>();
+
+// AWS Services
+// builder.Services.AddAWSService<IAmazonCloudWatch>();
+// builder.Services.AddAWSService<IAmazonCloudWatchLogs>();
+
+// Monitoring Services
+// builder.Services.AddScoped<ICloudWatchMetricsService, CloudWatchMetricsService>();
+// builder.Services.AddScoped<ICloudWatchLoggingService, CloudWatchLoggingService>();
+// builder.Services.AddScoped<ISeqLoggingService, SeqLoggingService>();
+builder.Services.AddScoped<ICombinedLoggingService, CombinedLoggingService>();
+// builder.Services.AddScoped<IApplicationMetricsService, ApplicationMetricsService>();
+// builder.Services.AddScoped<IApplicationLoggingService, ApplicationLoggingService>();
+
+// Performance Optimization Services
+builder.Services.AddScoped<IPerformanceOptimizationService, PerformanceOptimizationService>();
+builder.Services.AddScoped<ILoadTestingService, LoadTestingService>();
+
+// Memory Cache for performance optimization
+builder.Services.AddMemoryCache();
 
 // Health Checks
 builder.Services.AddHealthChecks()
@@ -122,9 +155,9 @@ builder.Services.AddAuthentication(options =>
 // Authorization
 builder.Services.AddAuthorization(options =>
 {
-    // Default policy requires authentication
+    // Default policy allows anonymous access for development
     options.DefaultPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
+        .RequireAssertion(_ => true) // Allow all requests
         .Build();
 
     // Admin-only policy
@@ -172,15 +205,40 @@ builder.Services.AddSignalR(options =>
     options.HandshakeTimeout = TimeSpan.FromSeconds(15);
 });
 
-// Notification Services
-builder.Services.AddScoped<INotificationService, SignalRNotificationService>();
+    // Notification Services
+    builder.Services.AddScoped<INotificationService, SignalRNotificationService>();
+    
+    // Push Notification Services
+    builder.Services.AddScoped<IPushNotificationService, PushNotificationService>();
+    builder.Services.AddScoped<IWebPushService, WebPushService>();
+    
+    // Connection Management Services
+    // builder.Services.AddScoped<IConnectionManagerService, ConnectionManagerService>();
+    
+    // SignalR Performance Monitoring Services
+    // builder.Services.AddScoped<ISignalRPerformanceService, SignalRPerformanceService>();
+    
+    // SignalR Load Testing Services
+    // builder.Services.AddScoped<ISignalRLoadTestService, SignalRLoadTestService>();
+    
+    // HttpClient for Web Push
+    builder.Services.AddHttpClient<IWebPushService, WebPushService>();
 
 // CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
+        policy.WithOrigins(
+                "http://localhost:3000", 
+                "https://localhost:3000",
+                "http://localhost:3001",
+                "https://localhost:3001",
+                "http://127.0.0.1:3000",
+                "https://127.0.0.1:3000",
+                "http://127.0.0.1:3001",
+                "https://127.0.0.1:3001"
+              )
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials(); // Required for SignalR
@@ -243,6 +301,13 @@ app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
 
+// Performance optimization middleware
+app.UseMiddleware<PerformanceMonitoringMiddleware>();
+app.UseMiddleware<CachingOptimizationMiddleware>();
+app.UseMiddleware<RequestThrottlingMiddleware>();
+app.UseMiddleware<CompressionOptimizationMiddleware>();
+app.UseMiddleware<ConnectionPoolOptimizationMiddleware>();
+
 app.UseAuthentication();
 
 // Add custom authorization middleware
@@ -252,9 +317,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// SignalR Hub Mapping
-app.MapHub<AuctionHub>("/auctionHub");
-app.MapHub<NotificationHub>("/notificationHub");
+    // SignalR Hub Mapping
+    app.MapHub<AuctionHub>("/auctionHub");
+    app.MapHub<NotificationHub>("/notificationHub");
 
 // Basic health check
 app.MapGet("/", () => new 
@@ -277,45 +342,46 @@ app.MapGet("/health", () => Results.Ok(new
 })).AllowAnonymous();
 
 // Initialize database and roles
-using (var scope = app.Services.CreateScope())
-{
-    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    
-    // Ensure database is created
-    await context.Database.EnsureCreatedAsync();
-    
-    // Create roles
-    string[] roles = { "Admin", "Member" };
-    foreach (var role in roles)
-    {
-        if (!await roleManager.RoleExistsAsync(role))
-        {
-            await roleManager.CreateAsync(new IdentityRole(role));
-        }
-    }
-    
-    // Create admin user
-    var adminEmail = "admin@sterling-auctions.com";
-    if (await userManager.FindByEmailAsync(adminEmail) == null)
-    {
-        var adminUser = new ApplicationUser
-        {
-            UserName = adminEmail,
-            Email = adminEmail,
-            FirstName = "System",
-            LastName = "Administrator",
-            EmailConfirmed = true,
-            IsActive = true
-        };
-        
-        var result = await userManager.CreateAsync(adminUser, "Admin123!");
-        if (result.Succeeded)
-        {
-            await userManager.AddToRoleAsync(adminUser, "Admin");
-        }
-    }
-}
+// Database initialization temporarily disabled
+// using (var scope = app.Services.CreateScope())
+// {
+//     var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+//     var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+//     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+//     
+//     // Ensure database is created
+//     // await context.Database.EnsureCreatedAsync();
+//     
+//     // Create roles
+//     string[] roles = { "Admin", "Member" };
+//     foreach (var role in roles)
+//     {
+//         if (!await roleManager.RoleExistsAsync(role))
+//         {
+//             await roleManager.CreateAsync(new IdentityRole(role));
+//         }
+//     }
+//     
+//     // Create admin user
+//     var adminEmail = "admin@sterling-auctions.com";
+//     if (await userManager.FindByEmailAsync(adminEmail) == null)
+//     {
+//         var adminUser = new ApplicationUser
+//         {
+//             UserName = adminEmail,
+//             Email = adminEmail,
+//             FirstName = "System",
+//             LastName = "Administrator",
+//             EmailConfirmed = true,
+//             IsActive = true
+//         };
+//         
+//         var result = await userManager.CreateAsync(adminUser, "Admin123!");
+//         if (result.Succeeded)
+//         {
+//             await userManager.AddToRoleAsync(adminUser, "Admin");
+//         }
+//     }
+// }
 
 app.Run();

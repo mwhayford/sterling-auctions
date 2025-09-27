@@ -1,0 +1,353 @@
+using Serilog;
+using Serilog.Context;
+using Serilog.Events;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+
+namespace SterlingAuctions.SimpleAPI.Services;
+
+/// <summary>
+/// Comprehensive logging service for Sterling Auctions
+/// </summary>
+public interface ILoggingService
+{
+    // Application Logging
+    void LogApplicationStart(string version);
+    void LogApplicationStop();
+    void LogApplicationError(Exception exception, string context = null);
+    
+    // API Logging
+    void LogApiRequest(string method, string path, string userId = null);
+    void LogApiResponse(string method, string path, int statusCode, long durationMs, string userId = null);
+    void LogApiError(string method, string path, Exception exception, string userId = null);
+    
+    // Security Logging
+    void LogSecurityEvent(string eventType, string userId = null, string ipAddress = null, string details = null);
+    void LogAuthenticationSuccess(string userId, string method = null);
+    void LogAuthenticationFailure(string userId, string reason, string ipAddress = null);
+    void LogAuthorizationFailure(string userId, string resource, string action);
+    void LogSuspiciousActivity(string userId, string activity, string ipAddress = null);
+    
+    // Performance Logging
+    void LogPerformanceMetric(string metricName, double value, string unit = null);
+    void LogSlowQuery(string query, long durationMs, string parameters = null);
+    void LogCacheHit(string cacheKey, string cacheType);
+    void LogCacheMiss(string cacheKey, string cacheType);
+    
+    // Business Logic Logging
+    void LogAuctionCreated(int auctionId, string userId);
+    void LogAuctionUpdated(int auctionId, string userId, string changes);
+    void LogBidPlaced(int auctionId, string userId, decimal amount);
+    void LogPaymentProcessed(int paymentId, string userId, decimal amount, bool success);
+    void LogUserRegistration(string userId, string email);
+    void LogUserLogin(string userId, string method);
+    
+    // System Logging
+    void LogSystemEvent(string eventType, string message, LogEventLevel level = LogEventLevel.Information);
+    void LogHealthCheck(string service, bool healthy, string details = null);
+    void LogConfigurationChange(string setting, string oldValue, string newValue);
+}
+
+/// <summary>
+/// Implementation of comprehensive logging service
+/// </summary>
+public class LoggingService : ILoggingService
+{
+    private readonly ILogger<LoggingService> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public LoggingService(ILogger<LoggingService> logger, IHttpContextAccessor httpContextAccessor)
+    {
+        _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    public void LogApplicationStart(string version)
+    {
+        using (LogContext.PushProperty("Component", "Application"))
+        using (LogContext.PushProperty("EventType", "ApplicationStart"))
+        {
+            _logger.Information("Sterling Auctions application started. Version: {Version}", version);
+        }
+    }
+
+    public void LogApplicationStop()
+    {
+        using (LogContext.PushProperty("Component", "Application"))
+        using (LogContext.PushProperty("EventType", "ApplicationStop"))
+        {
+            _logger.Information("Sterling Auctions application stopped");
+        }
+    }
+
+    public void LogApplicationError(Exception exception, string context = null)
+    {
+        using (LogContext.PushProperty("Component", "Application"))
+        using (LogContext.PushProperty("EventType", "ApplicationError"))
+        using (LogContext.PushProperty("Context", context))
+        {
+            _logger.Error(exception, "Application error occurred. Context: {Context}", context);
+        }
+    }
+
+    public void LogApiRequest(string method, string path, string userId = null)
+    {
+        using (LogContext.PushProperty("Component", "API"))
+        using (LogContext.PushProperty("EventType", "ApiRequest"))
+        using (LogContext.PushProperty("RequestMethod", method))
+        using (LogContext.PushProperty("RequestPath", path))
+        using (LogContext.PushProperty("UserId", userId))
+        {
+            _logger.Information("API Request: {Method} {Path} by user {UserId}", method, path, userId);
+        }
+    }
+
+    public void LogApiResponse(string method, string path, int statusCode, long durationMs, string userId = null)
+    {
+        using (LogContext.PushProperty("Component", "API"))
+        using (LogContext.PushProperty("EventType", "ApiResponse"))
+        using (LogContext.PushProperty("RequestMethod", method))
+        using (LogContext.PushProperty("RequestPath", path))
+        using (LogContext.PushProperty("ResponseStatusCode", statusCode))
+        using (LogContext.PushProperty("DurationMs", durationMs))
+        using (LogContext.PushProperty("UserId", userId))
+        {
+            var level = statusCode >= 400 ? LogEventLevel.Warning : LogEventLevel.Information;
+            _logger.Write(level, "API Response: {Method} {Path} -> {StatusCode} in {DurationMs}ms by user {UserId}", 
+                method, path, statusCode, durationMs, userId);
+        }
+    }
+
+    public void LogApiError(string method, string path, Exception exception, string userId = null)
+    {
+        using (LogContext.PushProperty("Component", "API"))
+        using (LogContext.PushProperty("EventType", "ApiError"))
+        using (LogContext.PushProperty("RequestMethod", method))
+        using (LogContext.PushProperty("RequestPath", path))
+        using (LogContext.PushProperty("UserId", userId))
+        {
+            _logger.Error(exception, "API Error: {Method} {Path} by user {UserId}", method, path, userId);
+        }
+    }
+
+    public void LogSecurityEvent(string eventType, string userId = null, string ipAddress = null, string details = null)
+    {
+        using (LogContext.PushProperty("Component", "Security"))
+        using (LogContext.PushProperty("EventType", eventType))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("IpAddress", ipAddress))
+        using (LogContext.PushProperty("Details", details))
+        {
+            _logger.Warning("Security Event: {EventType} by user {UserId} from {IpAddress}. Details: {Details}", 
+                eventType, userId, ipAddress, details);
+        }
+    }
+
+    public void LogAuthenticationSuccess(string userId, string method = null)
+    {
+        using (LogContext.PushProperty("Component", "Security"))
+        using (LogContext.PushProperty("EventType", "AuthenticationSuccess"))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("AuthMethod", method))
+        {
+            _logger.Information("Authentication successful for user {UserId} using {AuthMethod}", userId, method);
+        }
+    }
+
+    public void LogAuthenticationFailure(string userId, string reason, string ipAddress = null)
+    {
+        using (LogContext.PushProperty("Component", "Security"))
+        using (LogContext.PushProperty("EventType", "AuthenticationFailure"))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("FailureReason", reason))
+        using (LogContext.PushProperty("IpAddress", ipAddress))
+        {
+            _logger.Warning("Authentication failed for user {UserId}. Reason: {Reason} from {IpAddress}", 
+                userId, reason, ipAddress);
+        }
+    }
+
+    public void LogAuthorizationFailure(string userId, string resource, string action)
+    {
+        using (LogContext.PushProperty("Component", "Security"))
+        using (LogContext.PushProperty("EventType", "AuthorizationFailure"))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("Resource", resource))
+        using (LogContext.PushProperty("Action", action))
+        {
+            _logger.Warning("Authorization failed for user {UserId} attempting {Action} on {Resource}", 
+                userId, action, resource);
+        }
+    }
+
+    public void LogSuspiciousActivity(string userId, string activity, string ipAddress = null)
+    {
+        using (LogContext.PushProperty("Component", "Security"))
+        using (LogContext.PushProperty("EventType", "SuspiciousActivity"))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("Activity", activity))
+        using (LogContext.PushProperty("IpAddress", ipAddress))
+        {
+            _logger.Warning("Suspicious activity detected: {Activity} by user {UserId} from {IpAddress}", 
+                activity, userId, ipAddress);
+        }
+    }
+
+    public void LogPerformanceMetric(string metricName, double value, string unit = null)
+    {
+        using (LogContext.PushProperty("Component", "Performance"))
+        using (LogContext.PushProperty("EventType", "PerformanceMetric"))
+        using (LogContext.PushProperty("MetricName", metricName))
+        using (LogContext.PushProperty("MetricValue", value))
+        using (LogContext.PushProperty("MetricUnit", unit))
+        {
+            _logger.Information("Performance Metric: {MetricName} = {Value} {Unit}", metricName, value, unit);
+        }
+    }
+
+    public void LogSlowQuery(string query, long durationMs, string parameters = null)
+    {
+        using (LogContext.PushProperty("Component", "Performance"))
+        using (LogContext.PushProperty("EventType", "SlowQuery"))
+        using (LogContext.PushProperty("Query", query))
+        using (LogContext.PushProperty("DurationMs", durationMs))
+        using (LogContext.PushProperty("Parameters", parameters))
+        {
+            _logger.Warning("Slow Query detected: {Query} took {DurationMs}ms. Parameters: {Parameters}", 
+                query, durationMs, parameters);
+        }
+    }
+
+    public void LogCacheHit(string cacheKey, string cacheType)
+    {
+        using (LogContext.PushProperty("Component", "Performance"))
+        using (LogContext.PushProperty("EventType", "CacheHit"))
+        using (LogContext.PushProperty("CacheKey", cacheKey))
+        using (LogContext.PushProperty("CacheType", cacheType))
+        {
+            _logger.Debug("Cache Hit: {CacheKey} from {CacheType}", cacheKey, cacheType);
+        }
+    }
+
+    public void LogCacheMiss(string cacheKey, string cacheType)
+    {
+        using (LogContext.PushProperty("Component", "Performance"))
+        using (LogContext.PushProperty("EventType", "CacheMiss"))
+        using (LogContext.PushProperty("CacheKey", cacheKey))
+        using (LogContext.PushProperty("CacheType", cacheType))
+        {
+            _logger.Debug("Cache Miss: {CacheKey} from {CacheType}", cacheKey, cacheType);
+        }
+    }
+
+    public void LogAuctionCreated(int auctionId, string userId)
+    {
+        using (LogContext.PushProperty("Component", "Business"))
+        using (LogContext.PushProperty("EventType", "AuctionCreated"))
+        using (LogContext.PushProperty("AuctionId", auctionId))
+        using (LogContext.PushProperty("UserId", userId))
+        {
+            _logger.Information("Auction created: {AuctionId} by user {UserId}", auctionId, userId);
+        }
+    }
+
+    public void LogAuctionUpdated(int auctionId, string userId, string changes)
+    {
+        using (LogContext.PushProperty("Component", "Business"))
+        using (LogContext.PushProperty("EventType", "AuctionUpdated"))
+        using (LogContext.PushProperty("AuctionId", auctionId))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("Changes", changes))
+        {
+            _logger.Information("Auction updated: {AuctionId} by user {UserId}. Changes: {Changes}", 
+                auctionId, userId, changes);
+        }
+    }
+
+    public void LogBidPlaced(int auctionId, string userId, decimal amount)
+    {
+        using (LogContext.PushProperty("Component", "Business"))
+        using (LogContext.PushProperty("EventType", "BidPlaced"))
+        using (LogContext.PushProperty("AuctionId", auctionId))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("BidAmount", amount))
+        {
+            _logger.Information("Bid placed: {Amount} on auction {AuctionId} by user {UserId}", 
+                amount, auctionId, userId);
+        }
+    }
+
+    public void LogPaymentProcessed(int paymentId, string userId, decimal amount, bool success)
+    {
+        using (LogContext.PushProperty("Component", "Business"))
+        using (LogContext.PushProperty("EventType", "PaymentProcessed"))
+        using (LogContext.PushProperty("PaymentId", paymentId))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("Amount", amount))
+        using (LogContext.PushProperty("Success", success))
+        {
+            var level = success ? LogEventLevel.Information : LogEventLevel.Warning;
+            _logger.Write(level, "Payment processed: {PaymentId} for {Amount} by user {UserId}. Success: {Success}", 
+                paymentId, amount, userId, success);
+        }
+    }
+
+    public void LogUserRegistration(string userId, string email)
+    {
+        using (LogContext.PushProperty("Component", "Business"))
+        using (LogContext.PushProperty("EventType", "UserRegistration"))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("Email", email))
+        {
+            _logger.Information("User registered: {UserId} with email {Email}", userId, email);
+        }
+    }
+
+    public void LogUserLogin(string userId, string method)
+    {
+        using (LogContext.PushProperty("Component", "Business"))
+        using (LogContext.PushProperty("EventType", "UserLogin"))
+        using (LogContext.PushProperty("UserId", userId))
+        using (LogContext.PushProperty("LoginMethod", method))
+        {
+            _logger.Information("User login: {UserId} using {Method}", userId, method);
+        }
+    }
+
+    public void LogSystemEvent(string eventType, string message, LogEventLevel level = LogEventLevel.Information)
+    {
+        using (LogContext.PushProperty("Component", "System"))
+        using (LogContext.PushProperty("EventType", eventType))
+        {
+            _logger.Write(level, "System Event: {EventType} - {Message}", eventType, message);
+        }
+    }
+
+    public void LogHealthCheck(string service, bool healthy, string details = null)
+    {
+        using (LogContext.PushProperty("Component", "System"))
+        using (LogContext.PushProperty("EventType", "HealthCheck"))
+        using (LogContext.PushProperty("Service", service))
+        using (LogContext.PushProperty("Healthy", healthy))
+        using (LogContext.PushProperty("Details", details))
+        {
+            var level = healthy ? LogEventLevel.Information : LogEventLevel.Warning;
+            _logger.Write(level, "Health Check: {Service} is {Status}. Details: {Details}", 
+                service, healthy ? "healthy" : "unhealthy", details);
+        }
+    }
+
+    public void LogConfigurationChange(string setting, string oldValue, string newValue)
+    {
+        using (LogContext.PushProperty("Component", "System"))
+        using (LogContext.PushProperty("EventType", "ConfigurationChange"))
+        using (LogContext.PushProperty("Setting", setting))
+        using (LogContext.PushProperty("OldValue", oldValue))
+        using (LogContext.PushProperty("NewValue", newValue))
+        {
+            _logger.Information("Configuration changed: {Setting} from {OldValue} to {NewValue}", 
+                setting, oldValue, newValue);
+        }
+    }
+}

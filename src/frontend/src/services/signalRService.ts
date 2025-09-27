@@ -93,12 +93,15 @@ export class SignalRService {
       })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
+          // Limit retries to prevent infinite loops
+          if (retryContext.previousRetryCount >= 5) {
+            return null; // Stop retrying after 5 attempts
+          }
+          
           if (retryContext.previousRetryCount < 3) {
-            return 2000;
-          } else if (retryContext.previousRetryCount < 6) {
-            return 10000;
+            return 2000; // 2 seconds for first 3 attempts
           } else {
-            return 30000;
+            return 10000; // 10 seconds for remaining attempts
           }
         }
       })
@@ -125,12 +128,15 @@ export class SignalRService {
       })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
+          // Limit retries to prevent infinite loops
+          if (retryContext.previousRetryCount >= 5) {
+            return null; // Stop retrying after 5 attempts
+          }
+          
           if (retryContext.previousRetryCount < 3) {
-            return 2000;
-          } else if (retryContext.previousRetryCount < 6) {
-            return 10000;
+            return 2000; // 2 seconds for first 3 attempts
           } else {
-            return 30000;
+            return 10000; // 10 seconds for remaining attempts
           }
         }
       })
@@ -152,7 +158,7 @@ export class SignalRService {
     // Connection events
     this.auctionHub.onclose((error) => {
       console.log('Auction Hub connection closed:', error);
-      this.handleReconnection('auction');
+      // Don't trigger additional reconnection - let SignalR handle it
     });
 
     this.auctionHub.onreconnecting((error) => {
@@ -248,7 +254,7 @@ export class SignalRService {
     // Connection events
     this.notificationHub.onclose((error) => {
       console.log('Notification Hub connection closed:', error);
-      this.handleReconnection('notification');
+      // Don't trigger additional reconnection - let SignalR handle it
     });
 
     this.notificationHub.onreconnecting((error) => {

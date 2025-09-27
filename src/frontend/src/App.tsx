@@ -11,12 +11,16 @@ function App() {
   const [toastNotifications, setToastNotifications] = useState<any[]>([]);
   
   const { connectionStatus } = useSignalR({
-    autoConnect: true,
+    autoConnect: false, // Disable auto-connect to prevent rate limiting issues
     onConnected: () => {
       console.log('SignalR connected successfully');
     },
     onError: (error) => {
       console.error('SignalR error:', error);
+      // If SignalR fails repeatedly, we can disable it
+      if (error.includes('Failed to start the connection') || error.includes('timeout')) {
+        console.warn('SignalR connection failed, disabling auto-connect');
+      }
     }
   });
 

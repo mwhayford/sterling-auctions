@@ -1,0 +1,336 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using SterlingAuctions.SimpleAPI.Configuration;
+
+namespace SterlingAuctions.SimpleAPI.Services;
+
+/// <summary>
+/// Connection manager service for handling WebSocket fallbacks
+/// </summary>
+public interface IConnectionManagerService
+{
+    Task<bool> IsConnectionHealthyAsync(string userId);
+    Task<bool> SwitchTransportAsync(string userId, string transport);
+    Task<bool> ReconnectUserAsync(string userId);
+    Task<ConnectionHealthStatus> GetConnectionHealthAsync(string userId);
+    Task<List<string>> GetAvailableTransportsAsync();
+    Task<bool> IsTransportSupportedAsync(string transport);
+    Task<ConnectionStatistics> GetConnectionStatisticsAsync();
+}
+
+/// <summary>
+/// Connection health status
+/// </summary>
+public class ConnectionHealthStatus
+{
+    public string UserId { get; set; } = string.Empty;
+    public bool IsHealthy { get; set; }
+    public string CurrentTransport { get; set; } = string.Empty;
+    public int Latency { get; set; }
+    public DateTime LastHeartbeat { get; set; }
+    public int FailedAttempts { get; set; }
+    public string LastError { get; set; } = string.Empty;
+    public List<string> AvailableTransports { get; set; } = new();
+}
+
+/// <summary>
+/// Connection statistics
+/// </summary>
+public class ConnectionStatistics
+{
+    public int TotalConnections { get; set; }
+    public int ActiveConnections { get; set; }
+    public int FailedConnections { get; set; }
+    public Dictionary<string, int> ConnectionsByTransport { get; set; } = new();
+    public Dictionary<string, int> ConnectionsByStatus { get; set; } = new();
+    public double AverageLatency { get; set; }
+    public int TotalReconnects { get; set; }
+    public int TotalTransportSwitches { get; set; }
+}
+
+/// <summary>
+/// Connection manager configuration
+/// </summary>
+public class ConnectionManagerSettings
+{
+    public int HealthCheckInterval { get; set; } = 30000; // 30 seconds
+    public int MaxFailedAttempts { get; set; } = 3;
+    public int LatencyThreshold { get; set; } = 1000; // 1 second
+    public int HeartbeatTimeout { get; set; } = 60000; // 1 minute
+    public bool AutoSwitchTransport { get; set; } = true;
+    public bool AutoReconnect { get; set; } = true;
+    public string[] PreferredTransports { get; set; } = { "websockets", "sse", "longpolling", "polling" };
+}
+
+/// <summary>
+/// Connection manager service implementation
+/// </summary>
+public class ConnectionManagerService : IConnectionManagerService
+{
+    private readonly ILogger<ConnectionManagerService> _logger;
+    private readonly ICacheService _cacheService;
+    private readonly INotificationService _notificationService;
+    private readonly ConnectionManagerSettings _settings;
+    private readonly Dictionary<string, ConnectionHealthStatus> _connectionHealth = new();
+    private readonly Dictionary<string, int> _transportSwitchCount = new();
+    private readonly Dictionary<string, int> _reconnectCount = new();
+
+    public ConnectionManagerService(
+        ILogger<ConnectionManagerService> logger,
+        ICacheService cacheService,
+        INotificationService notificationService,
+        IOptions<ConnectionManagerSettings> settings)
+    {
+        _logger = logger;
+        _cacheService = cacheService;
+        _notificationService = notificationService;
+        _settings = settings.Value;
+    }
+
+    public async Task<bool> IsConnectionHealthyAsync(string userId)
+    {
+        try
+        {
+            var health = await GetConnectionHealthAsync(userId);
+            return health.IsHealthy;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking connection health for user {UserId}", userId);
+            return false;
+        }
+    }
+
+    public async Task<bool> SwitchTransportAsync(string userId, string transport)
+    {
+        try
+        {
+            _logger.LogInformation("Switching transport for user {UserId} to {Transport}", userId, transport);
+
+            if (!await IsTransportSupportedAsync(transport))
+            {
+                _logger.LogWarning("Transport {Transport} is not supported", transport);
+                return false;
+            }
+
+            // Update connection health
+            var health = await GetConnectionHealthAsync(userId);
+            health.CurrentTransport = transport;
+            health.FailedAttempts = 0;
+            health.LastError = string.Empty;
+            await UpdateConnectionHealthAsync(userId, health);
+
+            // Track transport switch
+            _transportSwitchCount[userId] = _transportSwitchCount.GetValueOrDefault(userId, 0) + 1;
+
+            // Notify user of transport switch
+            await _notificationService.NotifyUserAsync(userId, new
+            {
+                type = "TransportSwitch",
+                message = $"Switched to {transport}",
+                transport = transport,
+                timestamp = DateTime.UtcNow
+            });
+
+            _logger.LogInformation("Successfully switched transport for user {UserId} to {Transport}", userId, transport);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error switching transport for user {UserId} to {Transport}", userId, transport);
+            return false;
+        }
+    }
+
+    public async Task<bool> ReconnectUserAsync(string userId)
+    {
+        try
+        {
+            _logger.LogInformation("Reconnecting user {UserId}", userId);
+
+            // Reset connection health
+            var health = await GetConnectionHealthAsync(userId);
+            health.FailedAttempts = 0;
+            health.LastError = string.Empty;
+            await UpdateConnectionHealthAsync(userId, health);
+
+            // Track reconnect
+            _reconnectCount[userId] = _reconnectCount.GetValueOrDefault(userId, 0) + 1;
+
+            // Notify user of reconnect
+            await _notificationService.NotifyUserAsync(userId, new
+            {
+                type = "Reconnect",
+                message = "Reconnecting...",
+                timestamp = DateTime.UtcNow
+            });
+
+            _logger.LogInformation("Successfully initiated reconnect for user {UserId}", userId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reconnecting user {UserId}", userId);
+            return false;
+        }
+    }
+
+    public async Task<ConnectionHealthStatus> GetConnectionHealthAsync(string userId)
+    {
+        var cacheKey = $"connection_health_{userId}";
+        var health = await _cacheService.GetAsync<ConnectionHealthStatus>(cacheKey);
+
+        if (health == null)
+        {
+            health = new ConnectionHealthStatus
+            {
+                UserId = userId,
+                IsHealthy = false,
+                CurrentTransport = "websockets",
+                LastHeartbeat = DateTime.UtcNow,
+                FailedAttempts = 0,
+                AvailableTransports = _settings.PreferredTransports.ToList()
+            };
+            await UpdateConnectionHealthAsync(userId, health);
+        }
+
+        return health;
+    }
+
+    public async Task<List<string>> GetAvailableTransportsAsync()
+    {
+        return _settings.PreferredTransports.ToList();
+    }
+
+    public async Task<bool> IsTransportSupportedAsync(string transport)
+    {
+        return _settings.PreferredTransports.Contains(transport.ToLower());
+    }
+
+    public async Task<ConnectionStatistics> GetConnectionStatisticsAsync()
+    {
+        try
+        {
+            var statistics = new ConnectionStatistics();
+
+            // Get all connection health records
+            var allHealthRecords = new List<ConnectionHealthStatus>();
+            var cacheKeys = await GetAllConnectionHealthKeysAsync();
+            
+            foreach (var key in cacheKeys)
+            {
+                var health = await _cacheService.GetAsync<ConnectionHealthStatus>(key);
+                if (health != null)
+                {
+                    allHealthRecords.Add(health);
+                }
+            }
+
+            // Calculate statistics
+            statistics.TotalConnections = allHealthRecords.Count;
+            statistics.ActiveConnections = allHealthRecords.Count(h => h.IsHealthy);
+            statistics.FailedConnections = allHealthRecords.Count(h => !h.IsHealthy);
+
+            // Group by transport
+            statistics.ConnectionsByTransport = allHealthRecords
+                .GroupBy(h => h.CurrentTransport)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            // Group by status
+            statistics.ConnectionsByStatus = allHealthRecords
+                .GroupBy(h => h.IsHealthy ? "Healthy" : "Unhealthy")
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            // Calculate average latency
+            var healthyConnections = allHealthRecords.Where(h => h.IsHealthy && h.Latency > 0);
+            statistics.AverageLatency = healthyConnections.Any() 
+                ? healthyConnections.Average(h => h.Latency) 
+                : 0;
+
+            // Total reconnects and transport switches
+            statistics.TotalReconnects = _reconnectCount.Values.Sum();
+            statistics.TotalTransportSwitches = _transportSwitchCount.Values.Sum();
+
+            return statistics;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting connection statistics");
+            return new ConnectionStatistics();
+        }
+    }
+
+    public async Task UpdateConnectionHealthAsync(string userId, ConnectionHealthStatus health)
+    {
+        var cacheKey = $"connection_health_{userId}";
+        await _cacheService.SetAsync(cacheKey, health, TimeSpan.FromMinutes(10));
+    }
+
+    public async Task RecordHeartbeatAsync(string userId, int latency)
+    {
+        try
+        {
+            var health = await GetConnectionHealthAsync(userId);
+            health.LastHeartbeat = DateTime.UtcNow;
+            health.Latency = latency;
+            health.IsHealthy = latency <= _settings.LatencyThreshold;
+            health.FailedAttempts = 0;
+            health.LastError = string.Empty;
+
+            await UpdateConnectionHealthAsync(userId, health);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recording heartbeat for user {UserId}", userId);
+        }
+    }
+
+    public async Task RecordConnectionFailureAsync(string userId, string error)
+    {
+        try
+        {
+            var health = await GetConnectionHealthAsync(userId);
+            health.FailedAttempts++;
+            health.LastError = error;
+            health.IsHealthy = false;
+
+            await UpdateConnectionHealthAsync(userId, health);
+
+            // Auto-switch transport if enabled and max attempts reached
+            if (_settings.AutoSwitchTransport && health.FailedAttempts >= _settings.MaxFailedAttempts)
+            {
+                await TryAutoSwitchTransportAsync(userId, health);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error recording connection failure for user {UserId}", userId);
+        }
+    }
+
+    private async Task TryAutoSwitchTransportAsync(string userId, ConnectionHealthStatus health)
+    {
+        try
+        {
+            var currentTransportIndex = Array.IndexOf(_settings.PreferredTransports, health.CurrentTransport.ToLower());
+            var nextTransportIndex = (currentTransportIndex + 1) % _settings.PreferredTransports.Length;
+            var nextTransport = _settings.PreferredTransports[nextTransportIndex];
+
+            _logger.LogInformation("Auto-switching transport for user {UserId} from {CurrentTransport} to {NextTransport}", 
+                userId, health.CurrentTransport, nextTransport);
+
+            await SwitchTransportAsync(userId, nextTransport);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in auto-switch transport for user {UserId}", userId);
+        }
+    }
+
+    private async Task<List<string>> GetAllConnectionHealthKeysAsync()
+    {
+        // This is a simplified implementation
+        // In a real scenario, you might want to maintain a list of active connections
+        return new List<string>();
+    }
+}
