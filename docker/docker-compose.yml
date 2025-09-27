@@ -1,160 +1,110 @@
 version: '3.8'
 
 services:
-  # Frontend service
-  frontend:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.frontend
+  # Redis Cache Service
+  redis:
+    image: redis:7.2-alpine
+    container_name: sterling-redis
+    restart: unless-stopped
     ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:5000
-      - REACT_APP_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      - REACT_APP_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - REACT_APP_ENVIRONMENT=development
-    depends_on:
-      - backend
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf
     networks:
       - sterling-network
-    volumes:
-      - ../src/frontend/public:/usr/share/nginx/html/static
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    environment:
+      - REDIS_REPLICATION_MODE=master
 
-  # Backend service
-  backend:
+  # Sterling Auctions API
+  api:
     build:
       context: ..
-      dockerfile: docker/Dockerfile.backend
+      dockerfile: docker/Dockerfile.api
+    container_name: sterling-api
+    restart: unless-stopped
     ports:
-      - "5000:5000"
-      - "5001:5001"
+      - "5000:80"
+      - "5001:443"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ASPNETCORE_URLS=http://+:5000;https://+:5001
-      - ConnectionStrings__DefaultConnection=Host=postgres;Database=sterling_auctions;Username=postgres;Password=postgres
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
       - ConnectionStrings__Redis=redis:6379
-      - JwtSettings__SecretKey=${JWT_SECRET_KEY}
-      - Stripe__SecretKey=${STRIPE_SECRET_KEY}
-      - Stripe__PublishableKey=${STRIPE_PUBLISHABLE_KEY}
-      - GoogleAuth__ClientId=${GOOGLE_CLIENT_ID}
-      - GoogleAuth__ClientSecret=${GOOGLE_CLIENT_SECRET}
-      - Email__SendGridApiKey=${SENDGRID_API_KEY}
-      - AWS__AccessKey=${AWS_ACCESS_KEY}
-      - AWS__SecretKey=${AWS_SECRET_KEY}
+      - RedisSettings__ConnectionString=redis:6379
+      - RedisSettings__InstanceName=SterlingAuctions
+      - RedisSettings__DefaultDatabase=0
+      - RedisSettings__ConnectTimeout=5000
+      - RedisSettings__SyncTimeout=5000
+      - RedisSettings__AbortOnConnectFail=false
+      - RedisSettings__RetryCount=3
+      - RedisSettings__RetryDelayMs=1000
+      - JwtSettings__SecretKey=sterling-auctions-super-secret-jwt-key-at-least-32-characters-long!
+      - JwtSettings__Issuer=sterling-auctions
+      - JwtSettings__Audience=sterling-auctions-users
+      - JwtSettings__TokenExpirationInMinutes=60
+      - JwtSettings__RefreshTokenExpirationInDays=7
+      - GoogleOAuth__ClientId=${GOOGLE_CLIENT_ID:-your-google-client-id.apps.googleusercontent.com}
+      - GoogleOAuth__ClientSecret=${GOOGLE_CLIENT_SECRET:-your-google-client-secret}
+      - GoogleOAuth__RedirectUri=${GOOGLE_REDIRECT_URI:-https://localhost:5001/api/auth/google-callback}
     depends_on:
-      - postgres
+      redis:
+        condition: service_healthy
+    networks:
+      - sterling-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - ./logs:/app/logs
+
+  # Redis Commander (Optional - Web UI for Redis)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: sterling-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
       - redis
     networks:
       - sterling-network
-    volumes:
-      - backend-logs:/app/logs
-    restart: unless-stopped
+    profiles:
+      - tools
 
-  # PostgreSQL database
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_DB=sterling_auctions
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-    ports:
-      - "5432:5432"
-    networks:
-      - sterling-network
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
-    restart: unless-stopped
-
-  # Redis cache
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    networks:
-      - sterling-network
-    volumes:
-      - redis-data:/data
-    command: redis-server --appendonly yes --requirepass redis123
-    restart: unless-stopped
-
-  # Nginx reverse proxy
+  # Nginx Reverse Proxy (Optional)
   nginx:
     image: nginx:alpine
+    container_name: sterling-nginx
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/ssl:/etc/nginx/ssl
-      - nginx-logs:/var/log/nginx
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/ssl:/etc/nginx/ssl
     depends_on:
-      - frontend
-      - backend
+      - api
     networks:
       - sterling-network
-    restart: unless-stopped
+    profiles:
+      - production
 
-  # Seq logging server (development only)
-  seq:
-    image: datalust/seq:latest
-    environment:
-      - ACCEPT_EULA=Y
-    ports:
-      - "5341:80"
-    networks:
-      - sterling-network
-    volumes:
-      - seq-data:/data
-    restart: unless-stopped
-
-  # Prometheus monitoring
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    networks:
-      - sterling-network
-    restart: unless-stopped
-
-  # Grafana dashboards
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
-    depends_on:
-      - prometheus
-    networks:
-      - sterling-network
-    restart: unless-stopped
+volumes:
+  redis_data:
+    driver: local
 
 networks:
   sterling-network:
     driver: bridge
-
-volumes:
-  postgres-data:
-  redis-data:
-  backend-logs:
-  nginx-logs:
-  seq-data:
-  prometheus-data:
-  grafana-data:

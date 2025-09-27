@@ -1,0 +1,47 @@
+# Use the official .NET 9 runtime as base image
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+WORKDIR /app
+EXPOSE 80
+EXPOSE 443
+
+# Use the official .NET 9 SDK for building
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+
+# Copy project files
+COPY ["src/backend-simple/SterlingAuctions.SimpleAPI/SterlingAuctions.SimpleAPI.csproj", "src/backend-simple/SterlingAuctions.SimpleAPI/"]
+
+# Restore dependencies
+RUN dotnet restore "src/backend-simple/SterlingAuctions.SimpleAPI/SterlingAuctions.SimpleAPI.csproj"
+
+# Copy all source code
+COPY . .
+
+# Build the application
+WORKDIR "/src/src/backend-simple/SterlingAuctions.SimpleAPI"
+RUN dotnet build "SterlingAuctions.SimpleAPI.csproj" -c Release -o /app/build
+
+# Publish the application
+FROM build AS publish
+RUN dotnet publish "SterlingAuctions.SimpleAPI.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Create the final runtime image
+FROM base AS final
+WORKDIR /app
+
+# Copy the published application
+COPY --from=publish /app/publish .
+
+# Create a non-root user for security
+RUN adduser --disabled-password --gecos '' appuser && chown -R appuser /app
+USER appuser
+
+# Set environment variables
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV ASPNETCORE_URLS=http://+:80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost/health || exit 1
+
+ENTRYPOINT ["dotnet", "SterlingAuctions.SimpleAPI.dll"]
