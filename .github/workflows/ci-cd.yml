@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [master, develop]
   release:
     types: [published]
 
@@ -12,7 +12,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   NODE_VERSION: '18'
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '9.0.x'
 
 jobs:
   # Code Quality & Security
@@ -60,15 +60,15 @@ jobs:
 
       # Backend Quality Checks
       - name: Restore .NET Dependencies
-        working-directory: src/backend
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
         run: dotnet restore
 
       - name: .NET Format Check
-        working-directory: src/backend
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
         run: dotnet format --verify-no-changes --verbosity diagnostic
 
       - name: .NET Build
-        working-directory: src/backend
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
         run: dotnet build --no-restore --configuration Release
 
       # Security Scanning
@@ -147,17 +147,17 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore Dependencies
-        working-directory: src/backend
+        working-directory: tests/backend/SterlingAuctions.Tests
         run: dotnet restore
 
       - name: Run Unit Tests
-        working-directory: src/backend
+        working-directory: tests/backend/SterlingAuctions.Tests
         run: dotnet test --no-restore --configuration Release --collect:"XPlat Code Coverage" --results-directory ./coverage
 
       - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: src/backend/coverage/**/coverage.cobertura.xml
+          file: tests/backend/SterlingAuctions.Tests/coverage/**/coverage.cobertura.xml
           flags: backend
           name: backend-coverage
 
@@ -182,12 +182,12 @@ jobs:
           npx playwright install --with-deps
 
       - name: Start Test Environment
-        run: docker-compose -f docker/docker-compose.test.yml up -d
+        run: docker-compose -f docker/docker-compose.yml up -d
 
       - name: Wait for Services
         run: |
-          timeout 300 bash -c 'until curl -f http://localhost:3000/health; do sleep 5; done'
-          timeout 300 bash -c 'until curl -f http://localhost:5000/health; do sleep 5; done'
+          timeout 300 bash -c 'until curl -f http://localhost:3000; do sleep 5; done'
+          timeout 300 bash -c 'until curl -f http://localhost:5000/swagger; do sleep 5; done'
 
       - name: Run Playwright Tests
         working-directory: tests/e2e
@@ -235,37 +235,14 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and Push Frontend Image
+      - name: Build and Push API Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: docker/Dockerfile.frontend
+          file: docker/Dockerfile.api
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Backend Image
-      - name: Extract Backend Metadata
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and Push Backend Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.backend
-          push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -307,7 +284,7 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     needs: [build-images, e2e-tests]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     environment: production
     steps:
       - name: Configure AWS credentials

@@ -1,0 +1,72 @@
+config:
+  target: 'http://localhost:5000'
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      name: "Warm up"
+    - duration: 120
+      arrivalRate: 10
+      name: "Ramp up load"
+    - duration: 300
+      arrivalRate: 20
+      name: "Sustained load"
+    - duration: 60
+      arrivalRate: 5
+      name: "Ramp down"
+
+scenarios:
+  - name: "API Health Check"
+    weight: 20
+    flow:
+      - get:
+          url: "/swagger"
+      - get:
+          url: "/health"
+
+  - name: "Auction Operations"
+    weight: 40
+    flow:
+      - get:
+          url: "/api/auctions"
+      - think: 2
+      - get:
+          url: "/api/auctions/1"
+      - think: 1
+      - post:
+          url: "/api/auctions"
+          json:
+            title: "Test Auction"
+            description: "Performance test auction"
+            startingBid: 100
+            startTime: "{{ $isoTimestamp }}"
+            endTime: "{{ $addDate($isoTimestamp, 0, 0, 0, 0, 0, 7) }}"
+            categoryId: 1
+
+  - name: "Bidding Operations"
+    weight: 30
+    flow:
+      - get:
+          url: "/api/auctions"
+      - think: 1
+      - post:
+          url: "/api/auctions/1/bids"
+          json:
+            amount: 150
+            bidderId: "test-user-{{ $randomInt(1, 1000) }}"
+
+  - name: "User Operations"
+    weight: 10
+    flow:
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "test{{ $randomInt(1, 10000) }}@example.com"
+            password: "TestPassword123!"
+            firstName: "Test"
+            lastName: "User"
+      - think: 1
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "test@example.com"
+            password: "TestPassword123!"

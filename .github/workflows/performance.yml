@@ -1,0 +1,236 @@
+name: Performance Testing
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+  schedule:
+    - cron: '0 3 * * 0' # Weekly on Sunday at 3 AM
+
+jobs:
+  lighthouse-ci:
+    name: Lighthouse Performance Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: src/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: src/frontend
+        run: npm run build
+
+      - name: Serve static files
+        run: |
+          cd src/frontend/build
+          npx serve -s . -l 3000 &
+          sleep 10
+
+      - name: Run Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          urls: |
+            http://localhost:3000
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+          configPath: './tests/performance/lighthouse.config.js'
+
+  load-testing:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Artillery
+        run: npm install -g artillery@latest
+
+      - name: Start test environment
+        run: |
+          cd docker
+          docker-compose up -d
+          sleep 30
+
+      - name: Wait for services
+        run: |
+          timeout 300 bash -c 'until curl -f http://localhost:3000; do sleep 5; done'
+          timeout 300 bash -c 'until curl -f http://localhost:5000/swagger; do sleep 5; done'
+
+      - name: Run load tests
+        run: |
+          artillery run tests/performance/load-test.yml \
+            --target http://localhost:5000 \
+            --output performance-results.json
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: performance-results.json
+
+  stress-testing:
+    name: Stress Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Artillery
+        run: npm install -g artillery@latest
+
+      - name: Start test environment
+        run: |
+          cd docker
+          docker-compose up -d
+          sleep 30
+
+      - name: Wait for services
+        run: |
+          timeout 300 bash -c 'until curl -f http://localhost:3000; do sleep 5; done'
+          timeout 300 bash -c 'until curl -f http://localhost:5000/swagger; do sleep 5; done'
+
+      - name: Run stress tests
+        run: |
+          artillery run tests/performance/stress-test.yml \
+            --target http://localhost:5000 \
+            --output stress-results.json
+
+      - name: Upload stress test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-results
+          path: stress-results.json
+
+  memory-profiling:
+    name: Memory Profiling
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install dependencies
+        working-directory: src/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: src/frontend
+        run: npm run build
+
+      - name: Start backend with profiling
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
+        run: |
+          dotnet run --environment=Development &
+          sleep 10
+
+      - name: Serve frontend
+        run: |
+          cd src/frontend/build
+          npx serve -s . -l 3000 &
+          sleep 5
+
+      - name: Run memory profiling tests
+        run: |
+          node tests/performance/memory-profiling.js
+
+      - name: Upload memory profiling results
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-profiling-results
+          path: memory-profiling-results.json
+
+  bundle-analysis:
+    name: Bundle Size Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: src/frontend
+        run: npm ci
+
+      - name: Install bundle analyzer
+        working-directory: src/frontend
+        run: npm install --save-dev webpack-bundle-analyzer
+
+      - name: Build with bundle analysis
+        working-directory: src/frontend
+        run: |
+          npm run build
+          npx webpack-bundle-analyzer build/static/js/*.js -m static -r build/bundle-report.html
+
+      - name: Upload bundle analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-analysis
+          path: src/frontend/build/bundle-report.html
+
+  api-performance:
+    name: API Performance Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Start API
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
+        run: |
+          dotnet run --environment=Development &
+          sleep 15
+
+      - name: Install k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run API performance tests
+        run: |
+          k6 run tests/performance/api-load-test.js
+
+      - name: Upload API performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-performance-results
+          path: api-performance-results.json

@@ -1,0 +1,210 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    - cron: '0 9 * * 1' # Every Monday at 9 AM UTC
+  workflow_dispatch:
+
+jobs:
+  update-dependencies:
+    name: Update Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # Update frontend dependencies
+      - name: Update frontend dependencies
+        working-directory: src/frontend
+        run: |
+          npm update
+          npm audit fix --audit-level=moderate
+
+      # Update E2E test dependencies
+      - name: Update E2E dependencies
+        working-directory: tests/e2e
+        run: |
+          npm update
+          npm audit fix --audit-level=moderate
+
+      # Update .NET dependencies
+      - name: Update .NET dependencies
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
+        run: |
+          dotnet add package --version latest Microsoft.AspNetCore.Authentication.Google
+          dotnet add package --version latest Microsoft.AspNetCore.SignalR
+          dotnet add package --version latest Microsoft.Extensions.Caching.StackExchangeRedis
+          dotnet add package --version latest StackExchange.Redis
+          dotnet add package --version latest Stripe.net
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update dependencies'
+          title: 'chore: update dependencies'
+          body: |
+            ## Dependency Updates
+            
+            This PR updates the following dependencies:
+            
+            ### Frontend Dependencies
+            - Updated npm packages in `src/frontend/`
+            
+            ### E2E Test Dependencies
+            - Updated npm packages in `tests/e2e/`
+            
+            ### Backend Dependencies
+            - Updated .NET packages in `src/backend-simple/SterlingAuctions.SimpleAPI/`
+            
+            ## Testing
+            - [ ] All tests pass
+            - [ ] No breaking changes introduced
+            - [ ] Security vulnerabilities addressed
+            
+            ## Review Checklist
+            - [ ] Review dependency changes
+            - [ ] Test application functionality
+            - [ ] Check for any breaking changes
+            - [ ] Verify security updates
+          branch: dependency-updates
+          delete-branch: true
+
+  security-updates:
+    name: Security Updates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # Check for security vulnerabilities
+      - name: Check frontend security
+        working-directory: src/frontend
+        run: |
+          npm audit --audit-level=high
+          if [ $? -ne 0 ]; then
+            echo "Security vulnerabilities found in frontend"
+            npm audit fix --audit-level=high
+          fi
+
+      - name: Check E2E security
+        working-directory: tests/e2e
+        run: |
+          npm audit --audit-level=high
+          if [ $? -ne 0 ]; then
+            echo "Security vulnerabilities found in E2E tests"
+            npm audit fix --audit-level=high
+          fi
+
+      - name: Check .NET security
+        working-directory: src/backend-simple/SterlingAuctions.SimpleAPI
+        run: |
+          dotnet list package --vulnerable
+
+      - name: Check for security changes
+        id: security_changes
+        run: |
+          if git diff --quiet; then
+            echo "has_security_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_security_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Security Update PR
+        if: steps.security_changes.outputs.has_security_changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'security: fix vulnerabilities'
+          title: 'security: fix security vulnerabilities'
+          body: |
+            ## Security Updates
+            
+            This PR addresses security vulnerabilities found in dependencies:
+            
+            ### Changes Made
+            - Fixed high-severity security vulnerabilities
+            - Updated vulnerable packages to secure versions
+            
+            ## Priority
+            🔴 **HIGH PRIORITY** - Security vulnerabilities should be reviewed and merged quickly
+            
+            ## Testing
+            - [ ] All tests pass
+            - [ ] No functionality broken
+            - [ ] Security scan passes
+            
+            ## Review Checklist
+            - [ ] Review security fixes
+            - [ ] Test application functionality
+            - [ ] Verify no breaking changes
+            - [ ] Check security scan results
+          branch: security-updates
+          delete-branch: true
+
+  notify-updates:
+    name: Notify Updates
+    runs-on: ubuntu-latest
+    needs: [update-dependencies, security-updates]
+    if: always()
+    steps:
+      - name: Notify on success
+        if: needs.update-dependencies.result == 'success' || needs.security-updates.result == 'success'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: success
+          channel: '#dev-updates'
+          text: |
+            ✅ Dependency updates completed successfully
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify on failure
+        if: needs.update-dependencies.result == 'failure' || needs.security-updates.result == 'failure'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: failure
+          channel: '#dev-updates'
+          text: |
+            ❌ Dependency updates failed
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+            Check the Actions tab for details
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
