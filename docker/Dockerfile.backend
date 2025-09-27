@@ -1,0 +1,55 @@
+# Multi-stage build for ASP.NET Core API
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+WORKDIR /app
+EXPOSE 5000
+EXPOSE 5001
+
+# Install security updates and tools
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy project files
+COPY ["src/backend/SterlingAuctions.API.csproj", "SterlingAuctions.API/"]
+COPY ["src/backend/SterlingAuctions.Core/SterlingAuctions.Core.csproj", "SterlingAuctions.Core/"]
+COPY ["src/backend/SterlingAuctions.Infrastructure/SterlingAuctions.Infrastructure.csproj", "SterlingAuctions.Infrastructure/"]
+
+# Restore dependencies
+RUN dotnet restore "SterlingAuctions.API/SterlingAuctions.API.csproj"
+
+# Copy source code
+COPY src/backend/ .
+
+# Build the application
+WORKDIR "/src/SterlingAuctions.API"
+RUN dotnet build "SterlingAuctions.API.csproj" -c Release -o /app/build
+
+FROM build AS publish
+RUN dotnet publish "SterlingAuctions.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Final stage
+FROM base AS final
+WORKDIR /app
+
+# Create non-root user for security
+RUN groupadd -r dotnet && useradd -r -g dotnet dotnet
+
+# Copy published application
+COPY --from=publish /app/publish .
+
+# Set permissions
+RUN chown -R dotnet:dotnet /app
+
+# Switch to non-root user
+USER dotnet
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Entry point
+ENTRYPOINT ["dotnet", "SterlingAuctions.API.dll"]

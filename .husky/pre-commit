@@ -1,0 +1,40 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# Frontend checks
+echo "📦 Checking frontend..."
+cd src/frontend
+
+echo "🔍 TypeScript type checking..."
+npm run type-check
+
+echo "🧹 ESLint checking..."
+npm run lint
+
+echo "💅 Style checking..."
+npm run lint:style
+
+echo "🧪 Running quick tests..."
+npm run test:quick
+
+# Backend checks
+echo "🔧 Checking backend..."
+cd ../backend
+
+echo "🔍 .NET format checking..."
+dotnet format --verify-no-changes
+
+echo "🏗️  Building project..."
+dotnet build --configuration Release
+
+echo "🧪 Running unit tests..."
+dotnet test --no-build --configuration Release
+
+# Security checks
+echo "🔒 Running security checks..."
+cd ../../src/frontend
+npm audit --audit-level moderate
+
+echo "✅ Pre-commit checks completed successfully!"

@@ -1,0 +1,144 @@
+config:
+  target: 'https://api.sterling-auctions.com'
+  phases:
+    - duration: 60
+      arrivalRate: 5
+      name: "Warm up phase"
+    - duration: 120
+      arrivalRate: 10
+      name: "Ramp up load"
+    - duration: 300
+      arrivalRate: 15
+      name: "Sustained load"
+    - duration: 60
+      arrivalRate: 25
+      name: "Peak load"
+    - duration: 120
+      arrivalRate: 5
+      name: "Cool down"
+  defaults:
+    headers:
+      Content-Type: 'application/json'
+      User-Agent: 'Sterling-Auctions-LoadTest/1.0'
+  plugins:
+    expect: {}
+    metrics-by-endpoint: {}
+
+scenarios:
+  - name: "Browse Auctions"
+    weight: 40
+    flow:
+      - get:
+          url: "/api/auctions"
+          expect:
+            - statusCode: 200
+            - hasProperty: "data"
+      - think: 2
+      - get:
+          url: "/api/auctions/{{ $randomInt(1, 100) }}"
+          expect:
+            - statusCode: [200, 404]
+      - think: 1
+      - get:
+          url: "/api/auctions/{{ $randomInt(1, 100) }}/bids"
+          expect:
+            - statusCode: [200, 404]
+
+  - name: "User Authentication Flow"
+    weight: 20
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "loadtest{{ $randomInt(1, 1000) }}@example.com"
+            password: "LoadTest123!"
+          capture:
+            - json: "$.token"
+              as: "authToken"
+          expect:
+            - statusCode: [200, 401]
+      - think: 1
+      - get:
+          url: "/api/user/profile"
+          headers:
+            Authorization: "Bearer {{ authToken }}"
+          ifTrue: "authToken"
+          expect:
+            - statusCode: [200, 401]
+
+  - name: "Search and Filter"
+    weight: 25
+    flow:
+      - get:
+          url: "/api/auctions/search"
+          qs:
+            q: "{{ $randomString() }}"
+            category: "{{ $pick(['electronics', 'art', 'collectibles', 'jewelry']) }}"
+            minPrice: "{{ $randomInt(10, 100) }}"
+            maxPrice: "{{ $randomInt(100, 1000) }}"
+          expect:
+            - statusCode: 200
+      - think: 3
+      - get:
+          url: "/api/categories"
+          expect:
+            - statusCode: 200
+
+  - name: "Bidding Activity"
+    weight: 15
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "bidder{{ $randomInt(1, 100) }}@example.com"
+            password: "BidderPass123!"
+          capture:
+            - json: "$.token"
+              as: "bidderToken"
+          expect:
+            - statusCode: [200, 401]
+      - get:
+          url: "/api/auctions/active"
+          headers:
+            Authorization: "Bearer {{ bidderToken }}"
+          ifTrue: "bidderToken"
+          capture:
+            - json: "$[0].id"
+              as: "auctionId"
+          expect:
+            - statusCode: [200, 401]
+      - post:
+          url: "/api/auctions/{{ auctionId }}/bids"
+          headers:
+            Authorization: "Bearer {{ bidderToken }}"
+          json:
+            amount: "{{ $randomInt(100, 1000) }}"
+          ifTrue: "auctionId"
+          expect:
+            - statusCode: [200, 400, 401, 409]
+
+# Custom functions for data generation
+functions:
+  generateEmail: |
+    return `test${Math.floor(Math.random() * 10000)}@example.com`;
+  
+  generateBidAmount: |
+    return Math.floor(Math.random() * 1000) + 50;
+
+# Metrics and monitoring
+metrics:
+  - name: "response_time_95th_percentile"
+    threshold: 500
+  - name: "error_rate"
+    threshold: 5
+  - name: "requests_per_second"
+    threshold: 100
+
+# Before and after hooks
+before:
+  flow:
+    - log: "Starting load test..."
+
+after:
+  flow:
+    - log: "Load test completed"
