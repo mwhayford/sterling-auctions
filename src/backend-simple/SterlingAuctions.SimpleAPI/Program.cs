@@ -24,8 +24,6 @@ var builder = WebApplication.CreateBuilder(args);
 Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .WriteTo.Console()
-    .WriteToCloudWatch(builder.Configuration)
-    .WriteToSeq(builder.Configuration)
     .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -73,16 +71,23 @@ builder.Services.AddScoped<ISessionService, RedisSessionService>();
 builder.Services.AddScoped<IPaymentService, SimplePaymentService>();
 
 // AWS Services
-builder.Services.AddAWSService<IAmazonCloudWatch>();
-builder.Services.AddAWSService<IAmazonCloudWatchLogs>();
+// builder.Services.AddAWSService<IAmazonCloudWatch>();
+// builder.Services.AddAWSService<IAmazonCloudWatchLogs>();
 
 // Monitoring Services
-builder.Services.AddScoped<ICloudWatchMetricsService, CloudWatchMetricsService>();
-builder.Services.AddScoped<ICloudWatchLoggingService, CloudWatchLoggingService>();
-builder.Services.AddScoped<ISeqLoggingService, SeqLoggingService>();
-builder.Services.AddScoped<ICombinedLoggingService, CombinedLoggingService>();
-builder.Services.AddScoped<IApplicationMetricsService, ApplicationMetricsService>();
-builder.Services.AddScoped<IApplicationLoggingService, ApplicationLoggingService>();
+// builder.Services.AddScoped<ICloudWatchMetricsService, CloudWatchMetricsService>();
+// builder.Services.AddScoped<ICloudWatchLoggingService, CloudWatchLoggingService>();
+// builder.Services.AddScoped<ISeqLoggingService, SeqLoggingService>();
+// builder.Services.AddScoped<ICombinedLoggingService, CombinedLoggingService>();
+// builder.Services.AddScoped<IApplicationMetricsService, ApplicationMetricsService>();
+// builder.Services.AddScoped<IApplicationLoggingService, ApplicationLoggingService>();
+
+// Performance Optimization Services
+builder.Services.AddScoped<IPerformanceOptimizationService, PerformanceOptimizationService>();
+builder.Services.AddScoped<ILoadTestingService, LoadTestingService>();
+
+// Memory Cache for performance optimization
+builder.Services.AddMemoryCache();
 
 // Health Checks
 builder.Services.AddHealthChecks()
@@ -268,6 +273,13 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
+
+// Performance optimization middleware
+app.UseMiddleware<PerformanceMonitoringMiddleware>();
+app.UseMiddleware<CachingOptimizationMiddleware>();
+app.UseMiddleware<RequestThrottlingMiddleware>();
+app.UseMiddleware<CompressionOptimizationMiddleware>();
+app.UseMiddleware<ConnectionPoolOptimizationMiddleware>();
 
 app.UseAuthentication();
 
