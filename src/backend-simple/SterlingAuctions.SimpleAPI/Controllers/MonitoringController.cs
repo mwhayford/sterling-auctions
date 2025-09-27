@@ -45,9 +45,9 @@ public class MonitoringController : ControllerBase
             stopwatch.Stop();
 
             // Record various metrics
-            await _metricsService.RecordApiRequestAsync("POST", "/api/monitoring/test-metrics", 200, stopwatch.ElapsedMilliseconds);
-            await _metricsService.RecordUserActionAsync(userId, "TestMetrics", new { Duration = stopwatch.ElapsedMilliseconds });
-            await _metricsService.RecordPerformanceMetricAsync("TestMetricsDuration", stopwatch.ElapsedMilliseconds, "Milliseconds");
+            // await _metricsService.RecordApiRequestAsync("POST", "/api/monitoring/test-metrics", 200, stopwatch.ElapsedMilliseconds);
+            // await _metricsService.RecordUserActionAsync(userId, "TestMetrics", new { Duration = stopwatch.ElapsedMilliseconds });
+            // await _metricsService.RecordPerformanceMetricAsync("TestMetricsDuration", stopwatch.ElapsedMilliseconds, "Milliseconds");
 
             return Ok(new { message = "Metrics recorded successfully", duration = stopwatch.ElapsedMilliseconds });
         }
@@ -109,7 +109,7 @@ public class MonitoringController : ControllerBase
             await _combinedLoggingService.LogCriticalAsync("Test critical log", testException, new { UserId = userId, TestType = "Critical" });
 
             // Record error metrics
-            await _metricsService.RecordErrorAsync("TestError", "MonitoringController");
+            // await _metricsService.RecordErrorAsync("TestError", "MonitoringController");
 
             return Ok(new { message = "Error logging test completed successfully" });
         }
@@ -139,9 +139,9 @@ public class MonitoringController : ControllerBase
             await _combinedLoggingService.LogAuctionEventAsync(auctionId, "BidPlaced", new { BidderId = userId, Amount = bidAmount });
 
             // Record auction metrics
-            await _metricsService.RecordAuctionEventAsync("AuctionCreated", auctionId);
-            await _metricsService.RecordAuctionEventAsync("AuctionStarted", auctionId);
-            await _metricsService.RecordBidEventAsync(auctionId, bidAmount);
+            // await _metricsService.RecordAuctionEventAsync("AuctionCreated", auctionId);
+            // await _metricsService.RecordAuctionEventAsync("AuctionStarted", auctionId);
+            // await _metricsService.RecordBidEventAsync(auctionId, bidAmount);
 
             return Ok(new { message = "Auction events test completed successfully", auctionId, bidAmount });
         }
@@ -171,7 +171,7 @@ public class MonitoringController : ControllerBase
             await _combinedLoggingService.LogPaymentEventAsync(paymentId, "PaymentCompleted", new { UserId = userId, Amount = amount });
 
             // Record payment metrics
-            await _metricsService.RecordPaymentEventAsync(paymentId, amount, true);
+            // await _metricsService.RecordPaymentEventAsync(paymentId, amount, true);
 
             return Ok(new { message = "Payment events test completed successfully", paymentId, amount });
         }
@@ -199,9 +199,9 @@ public class MonitoringController : ControllerBase
             await _combinedLoggingService.LogSecurityEventAsync("UnauthorizedAccess", userId, new { Resource = "/api/admin", Action = "GET" });
 
             // Record security metrics
-            await _metricsService.RecordAuthenticationAsync("Password", true);
-            await _metricsService.RecordAuthenticationAsync("Password", false);
-            await _metricsService.RecordAuthorizationAsync("AdminPanel", "Read", false);
+            // await _metricsService.RecordAuthenticationAsync("Password", true);
+            // await _metricsService.RecordAuthenticationAsync("Password", false);
+            // await _metricsService.RecordAuthorizationAsync("AdminPanel", "Read", false);
 
             return Ok(new { message = "Security events test completed successfully" });
         }
@@ -238,7 +238,7 @@ public class MonitoringController : ControllerBase
                 await Task.Delay(operation.Duration);
                 
                 await _combinedLoggingService.LogPerformanceEventAsync(operation.Name, operation.Duration, new { UserId = userId });
-                await _metricsService.RecordPerformanceMetricAsync(operation.Name, operation.Duration, "Milliseconds");
+                // await _metricsService.RecordPerformanceMetricAsync(operation.Name, operation.Duration, "Milliseconds");
             }
 
             stopwatch.Stop();

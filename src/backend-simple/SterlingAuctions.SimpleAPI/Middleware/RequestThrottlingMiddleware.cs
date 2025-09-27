@@ -17,8 +17,8 @@ public class RequestThrottlingMiddleware
     private readonly Timer _cleanupTimer;
 
     // Rate limiting configuration
-    private readonly int _maxRequestsPerMinute = 100;
-    private readonly int _maxRequestsPerHour = 1000;
+    private readonly int _maxRequestsPerMinute = 1000; // Increased for development
+    private readonly int _maxRequestsPerHour = 10000; // Increased for development
     private readonly TimeSpan _cleanupInterval = TimeSpan.FromMinutes(1);
 
     public RequestThrottlingMiddleware(

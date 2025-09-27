@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files
 COPY src/frontend/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+    # Install dependencies
+    RUN npm ci --only=production --legacy-peer-deps --ignore-scripts
 
 # Copy source code
 COPY src/frontend/ ./
@@ -24,8 +24,8 @@ RUN apk update && apk upgrade && apk add --no-cache \
     ca-certificates \
     && rm -rf /var/cache/apk/*
 
-# Copy custom nginx configuration
-COPY docker/nginx.conf /etc/nginx/nginx.conf
+    # Copy custom nginx configuration
+    COPY docker/nginx-frontend.conf /etc/nginx/nginx.conf
 
 # Copy built application from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
@@ -34,25 +34,21 @@ COPY --from=builder /app/build /usr/share/nginx/html
 COPY docker/env-setup.sh /docker-entrypoint.d/40-env-setup.sh
 RUN chmod +x /docker-entrypoint.d/40-env-setup.sh
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S reactuser -u 1001 -G nodejs
+# Create directories for nginx
+RUN mkdir -p /var/cache/nginx /var/run /var/log/nginx
 
-# Set permissions
-RUN chown -R reactuser:nodejs /usr/share/nginx/html && \
-    chown -R reactuser:nodejs /var/cache/nginx && \
-    chown -R reactuser:nodejs /var/run && \
-    chown -R reactuser:nodejs /var/log/nginx
-
-# Switch to non-root user
-USER reactuser
+# Set proper permissions for nginx
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chown -R nginx:nginx /var/run && \
+    chown -R nginx:nginx /var/log/nginx
 
 # Expose port
-EXPOSE 3000
+EXPOSE 80
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/ || exit 1
+    CMD curl -f http://localhost:80/ || exit 1
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]
